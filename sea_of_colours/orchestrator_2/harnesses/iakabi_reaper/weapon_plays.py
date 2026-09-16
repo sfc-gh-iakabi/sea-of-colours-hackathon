@@ -63,11 +63,11 @@ from .weapon_forge import EconomyPolicy, WeaponPlay
 # after firing), and cap the stockpile at 2 (a decisive salvo, not a hoard
 # against the public 600-blue cap). We also declare SNAP now, so the economy
 # is allowed to buy it (it caps undeclared weapons at 0). Cap: 2 EMP + 2 SNAP =
-# 600 blue if fully stocked. We now declare THREE weapons (emp + snap + chaff),
-# and the public arsenal cap is 600 blue: chaff 300 + emp 200 + snap 100 = 600,
-# so covering every case means about ONE charge of each. Caps set accordingly;
-# raise emp/snap and drop chaff if you want depth over breadth.
-ECONOMY = EconomyPolicy(seek_blue_always=True, hold_at={"chaff": 1, "emp": 1, "snap": 1})
+# 600 blue if fully stocked. EMP + SNAP share geometry and both fit under the
+# 600 public cap (2 emp + 2 snap = 600). Chaff was dropped: at 300 blue it lands
+# emp on the cap boundary so emp could never arm, and its denial role overlaps
+# LIGHTS_DOWN / BLIND_THE_FINDER anyway. Aggressive across every case without it.
+ECONOMY = EconomyPolicy(seek_blue_always=True, hold_at={"emp": 2, "snap": 2})
 
 
 PLAYS: Tuple[WeaponPlay, ...] = (
@@ -142,18 +142,6 @@ PLAYS: Tuple[WeaponPlay, ...] = (
             "killing the single freshest eye that lights their best target "
             "costs us 100 blue and costs them the landing it was covering; "
             "small and cheap, but it taxes their tempo every night we can afford it"
-        ),
-    ),
-    WeaponPlay(
-        play_id="CANCEL_DROP",
-        weapon="chaff",
-        when="redsign_theirs",
-        hour="super_early",
-        combines_with="blind_grab",
-        why=(
-            "a rival that has just lit a pure drops on it at hour one; a flare "
-            "cancels that whole hour \u2014 not just their vision \u2014 killing "
-            "the smash-and-grab, then our blind-grab combs it once our jam lifts"
         ),
     ),
     # ─── ADD YOUR MOVE HERE ───────────────────────────────────────────────
