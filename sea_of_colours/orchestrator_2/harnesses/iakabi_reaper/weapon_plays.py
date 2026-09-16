@@ -57,53 +57,73 @@ from .weapon_forge import EconomyPolicy, WeaponPlay
 # Change something only if you mean it. `hold_at={"chaff": 1}` caps the rack at
 # one; `seek_blue_when_rack_empty=False` reverts to the baseline's behaviour of
 # only topping up when the VAULT is short.
-# EMP is 200 blue; buy_asap + never_buy_what_you_cannot_fire are already the
-# defaults. The two changes below fund it: seek blue EVERY night (the default
-# only seeks when the rack is empty, which starves the 2nd EMP and the refill
-# after firing), and cap the stockpile at 2 (a decisive salvo, not a hoard
-# against the public 600-blue cap). We also declare SNAP now, so the economy
-# is allowed to buy it (it caps undeclared weapons at 0). Cap: 2 EMP + 2 SNAP =
-# 600 blue if fully stocked. EMP + SNAP share geometry and both fit under the
-# 600 public cap (2 emp + 2 snap = 600). Chaff was dropped: at 300 blue it lands
-# emp on the cap boundary so emp could never arm, and its denial role overlaps
-# LIGHTS_DOWN / BLIND_THE_FINDER anyway. Aggressive across every case without it.
-ECONOMY = EconomyPolicy(seek_blue_always=True, hold_at={"emp": 2, "snap": 2})
+# Tuned from an 18-season soak vs tabula_v12 (reports/soak/ 10, reports/soak2/ 8).
+#   * Credits, not hours, were the binding constraint. Every season deferred a
+#     harvester ("need 1500c, have 1250c") - short by exactly one never-fired
+#     charge - and the fleet never reached its 3-harvester cap while the
+#     15-parcel vault was never filled. So cap the rack at ONE of each.
+#   * seek_blue_always was harmful. Blue never scores, and chasing it burned
+#     whole outings (one night banked +0 red doing a blue grab; another spent a
+#     final-night harvester on blue, worth a guaranteed 0). Back to the default:
+#     seek blue only when the rack cannot fire.
+#
+# CHAFF IS BACK, and the reason it was dropped was WRONG. The old note here read
+# "at 300 blue it puts emp on the 600 cap boundary so emp could never arm". The
+# engine refuses a build only when it would go OVER the cap:
+#
+#     if held_blue + blue_needed > cap:   # session.py, _apply_build_weapon
+#
+# so 100 + 200 + 300 = 600 is legal - `600 > 600` is False. What actually broke
+# the rack was holding TWO of each (400 + 200 = 600) and then asking for chaff on
+# top. One of each fits EXACTLY, with ZERO headroom: any surplus charge silently
+# fails the next build. That is the failure mode to watch in check_wiring.
+#
+# Chaff also earns its slot on price ALONE: 300 blue and **0 CREDITS**. Snap and
+# emp each cost 250 credits - which is roughly the sum every season was short by
+# when it deferred the 3rd harvester. Chaff is the only weapon that does not
+# compete with the fleet.
+ECONOMY = EconomyPolicy(hold_at={"emp": 1, "snap": 1, "chaff": 1})
 
 
+# ── DOCTRINE: hit the GROUND or hit the CLOCK. Never hit the EYES. ────────
+#
+# The 18-season soak fired 16 shots. THIRTEEN of them were aimed at rival
+# probes (NIGHTFALL 12, BLIND_THE_FINDER 1) and produced ZERO recorded rival
+# loss, plus one friendly-fire night that cost ~500 red. That was not bad
+# tuning. It was structurally impossible, and the engine says why:
+#
+#   _harvest_at() has NO visibility check. Its only gate is the tile colour.
+#   Only the INITIAL LANDING is gated on live vision (RULEBOOK 3.9.7).
+#
+# So a rival who has ALREADY SEEN a pure harvests it in total darkness. Blinding
+# him takes nothing away, and a dead probe is re-bought for 250c - the cards show
+# him relaunching three fresh eyes within hours of our strike. Anti-eye plays are
+# deleted and must not come back.
+#
+# What DOES bite:
+#   GROUND - snap resolves ABOVE the vision snapshot, so it is the only weapon
+#            that can refuse a landing TONIGHT. emp resolves BELOW it, so it
+#            cannot stop tonight's committed drop but seals the next 8 hours.
+#   CLOCK  - chaff cancels every seat's hour, OURS INCLUDED (launcher is immune
+#            for hour N only, then self-jammed for the carry-over). 3 slots each,
+#            so it is a NEUTRAL trade until our own hours are worthless - and a
+#            harvester gets ONE OUTING PER NIGHT, so once our tours are home our
+#            late hours are worth nothing and his are worth a full outing.
+#
+# One weapon per information state:
+#   a rival lit a pure  -> GROUND: emp his seam, snap the contested cell
+#   nobody lit a pure   -> CLOCK: nothing to deny, so steal his late hours
+#   final night         -> CLOCK: an hour taken from him is never recovered
+#
+# menu_rank is ASCENDING - lower shows FIRST. All four plays used to sit at 0,
+# so their order was declaration order, i.e. luck. They are now ranked by
+# MEASURED value, because ranking is mechanical and prose is not: the doctrine
+# below was already in the file and the model talked past it in 5 seasons of 8.
 PLAYS: Tuple[WeaponPlay, ...] = (
-    WeaponPlay(
-        play_id="LIGHTS_DOWN",
-        weapon="emp",
-        when="redsign_theirs",
-        hour="super_early",
-        targets="redsign",
-        probe_the_comb=True,
-        take_the_ground=True,
-        combines_with="blind_grab",
-        why=(
-            "covering their smear at H1 locks them out of their own pure for "
-            "eight hours; then we comb the ground they cannot reach \u2014 the "
-            "exposed edge now, or the interior once our own cloud clears"
-        ),
-    ),
-    WeaponPlay(
-        play_id="BLIND_THE_FINDER",
-        weapon="snap",
-        when="redsign_theirs",
-        hour="super_early",
-        targets="finder_probe",
-        min_targets=1,
-        combines_with="blind_grab",
-        why=(
-            "when a rival lights a pure we cannot see, the eye that found it "
-            "is the only target we can name; snapping it at hour one refuses "
-            "their drop for lack of live vision, then a paired blind-grab combs "
-            "the smear they can no longer reach"
-        ),
-    ),
     WeaponPlay(
         play_id="PURE_TRAP",
         weapon="snap",
+        menu_rank=10,          # the ONLY play with a proven kill: 1 shot, +765
         when="always",
         hour="super_early",
         targets="contested_pure",
@@ -113,73 +133,60 @@ PLAYS: Tuple[WeaponPlay, ...] = (
             "a pure we can see that a rival probe also watches is the one cell "
             "whose occupation is predictable \u2014 they smash-and-grab it at "
             "hour one; snapping it refuses that landing and damages the hull, "
-            "then a smash-grab lands on the cold pure at hour two and banks it"
+            "then a smash-grab lands on the cold pure at hour two and banks it "
+            "\u2014 765 points denied to them is worth exactly 765 banked by us"
         ),
     ),
     WeaponPlay(
-        play_id="NIGHTFALL",
+        play_id="LIGHTS_DOWN",
         weapon="emp",
-        when="no_redsign",
+        menu_rank=20,
+        when="redsign_theirs",
         hour="super_early",
-        targets="rival_probes",
-        min_targets=2,
-        combines_with="standalone",
+        targets="redsign",
+        min_targets=1,
+        probe_the_comb=True,
+        take_the_ground=True,
+        combines_with="blind_grab",
         why=(
-            "on a night with no pure lit, their vision IS their plan; one cloud "
-            "over two or more clustered eyes blinds their whole read for eight "
-            "hours and refuses the landings those eyes were covering"
+            "covering their smear at H1 locks them out of their own pure for "
+            "eight hours; then we comb the ground they cannot reach \u2014 the "
+            "exposed edge now, or the interior once our own cloud clears. "
+            "Offered in season 8 with the charge in the rack and declined: the "
+            "rival banked that pure for 765 and wrote it down. Do not decline it"
         ),
     ),
     WeaponPlay(
-        play_id="TEMPO_TAX",
-        weapon="snap",
+        play_id="LAST_CALL",
+        weapon="chaff",
+        menu_rank=30,
         when="always",
-        hour="early",
-        targets="rival_probes",
+        hour="last_night",
+        targets="pattern",
         min_targets=1,
         combines_with="standalone",
         why=(
-            "killing the single freshest eye that lights their best target "
-            "costs us 100 blue and costs them the landing it was covering; "
-            "small and cheap, but it taxes their tempo every night we can afford it"
+            "on the final night an hour taken from them is gone for good \u2014 "
+            "there is no tomorrow to make it up in, while our own red is already "
+            "banked and ships itself; three of our dead hours for three of their "
+            "live ones, and it costs zero credits"
         ),
     ),
-    # ─── ADD YOUR MOVE HERE ───────────────────────────────────────────────
-    # Both examples below are COMMENTED OUT on purpose. Uncomment one and
-    # rename it, or write your own. An unedited file declares NO plays and
-    # `check_wiring.py` will say so — that is correct, not a bug.
-    #
-    # It used to ship CANCEL_SMASH live, and six separate builders either
-    # shipped it by accident or spent time working out whether they should.
-
-    # ─────────────────────────────────────────────────────────────────────
-    # THIS IS A PLACEHOLDER. Rename `play_id` to YOUR move and rewrite `why`,
-    # or delete the whole block. It is live code, not a comment: leave it and
-    # your agent ships a move called CANCEL_SMASH, buys chaff to feed it, and
-    # your own weapon competes with it on the menu.
-    # ─────────────────────────────────────────────────────────────────────
-    # WeaponPlay(
-    #     play_id="CANCEL_SMASH",
-    #     weapon="chaff",
-    #     when="redsign_theirs",
-    #     hour="super_early",
-    #     combines_with="blind_grab",
-    #     why=(
-    #         "a seat that has just found a pure drops on it at hour 1, so "
-    #         "cancelling that one hour takes their whole opening and leaves the "
-    #         "pure sitting there for us to walk onto"
-    #     ),
-    # ),
-    #
-    # # Add more moves here. A second weapon is one more entry — for example:
-    #
-    # WeaponPlay(
-    #     play_id="TEMPO_TAX",
-    #     weapon="snap",
-    #     when="always",
-    #     hour="early",
-    #     combines_with="standalone",
-    #     why="killing the single eye that lights their best target costs us "
-    #         "100 blue and costs them the landing it was covering",
-    # ),
+    WeaponPlay(
+        play_id="TEMPO_THEFT",
+        weapon="chaff",
+        menu_rank=40,
+        when="no_redsign",
+        hour="late",
+        targets="pattern",
+        min_targets=1,
+        combines_with="standalone",
+        why=(
+            "with no pure lit there is no ground worth denying, so we take hours "
+            "instead: by hour sixteen every harvester of ours has spent its one "
+            "outing, so the flare costs us three worthless slots and costs them "
+            "a whole outing \u2014 and unlike snap or emp it costs no credits, "
+            "so it never delays the third harvester"
+        ),
+    ),
 )

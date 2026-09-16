@@ -74,7 +74,21 @@ class OrbitDials:
     #: Probe magazine the playbook tops up toward each turn. Sized for a
     #: night of hot-drops (one securing probe per uncovered vein,
     #: RULEBOOK §3.9.7) plus an exploration probe.
-    probe_target_stock: int = 4
+    #:
+    #: 4 -> 2 after the 18-season soak. Two findings:
+    #:   * Probes were the credit leak. At 250c each, a magazine of 4 is 1000c
+    #:     while EVERY season deferred a harvester short by roughly 250c.
+    #:   * tabula_v12 scores WITHOUT probing, off red it already remembers,
+    #:     because _harvest_at has no visibility check — vision is needed only
+    #:     to LAND (RULEBOOK §3.9.7). So probe spend buys landings, not yield.
+    #:
+    #: MUST STAY STRICTLY POSITIVE. The active drop mode is `live_only` and an
+    #: orbital harvester has no position, so it lights nothing: with zero probes
+    #: the FIRST drop of the season is illegal and the seat never gets going.
+    #: Probes also expire after 3 nights, so one on night 1 is not durable.
+    #: A landed harvester lights a radius-1 plus, so later drops can piggyback
+    #: on it — which is why 2 is enough and 0 is fatal.
+    probe_target_stock: int = 2
 
     #: BLUE above which a weapon is ALWAYS built: chaff first when the
     #: rack is empty (the hour 5-7 / 11-13 egress jam, RULEBOOK §5),
@@ -275,18 +289,42 @@ def plan_orbit_actions(
         descriptors.append(f"repaired {harv.get('id')} ({repair_cost}c)")
 
     # Priority 2: build a new harvester if under cap and affordable.
+    #
+    # v19 — RESERVE THE LANDING. A fresh harvester is built INTO ORBIT with no
+    # board position, and the active drop mode is `live_only`: it can only land
+    # on a cell under live sensor cover. An orbital unit lights nothing, so with
+    # no probe in stock and no harvester already down, a rig bought here is
+    # STRANDED — 1500c for zero parcels, which is the worst single outcome in
+    # the whole policy. The cascade spends one shared wallet in priority order,
+    # so the harvester used to be able to eat the probe money that would have
+    # landed it.
+    #
+    # Reserve the price of ONE probe unless we can already land: either probes
+    # in stock, or a harvester on the surface whose radius-1 plus is legal
+    # drop ground for the newcomer.
+    probe_stock_now = int(orbit.get("probe_stock", 0) or 0)
+    can_already_land = probe_stock_now > 0 or any(
+        h.get("x") is not None for h in _my_harvesters(view)
+    )
+    landing_reserve = 0 if can_already_land else probe_cost
     if cap_used >= cap_max:
         descriptors.append(
             f"skipped harvester build (fleet at cap {cap_used}/{cap_max})",
         )
-    elif remaining >= harvester_cost:
+    elif remaining >= harvester_cost + landing_reserve:
         actions.append({"a": "build_harvester"})
         remaining -= harvester_cost
         descriptors.append(f"built harvester ({harvester_cost}c)")
+    elif landing_reserve and remaining >= harvester_cost:
+        descriptors.append(
+            f"withheld harvester build ({harvester_cost}c affordable, but "
+            f"holding {probe_cost}c for the probe that lands it — no live "
+            f"cover, so buying now strands it in orbit)",
+        )
     else:
         descriptors.append(
-            f"deferred harvester build (need {harvester_cost}c, "
-            f"have {remaining}c)",
+            f"deferred harvester build (need "
+            f"{harvester_cost + landing_reserve}c, have {remaining}c)",
         )
 
     # Priority 3: weapons, tiered on rolled-up BLUE. Chaff leads the
@@ -317,19 +355,37 @@ def plan_orbit_actions(
             int(weapon_stock.get(kind, 0) or 0) * int(price.get("blue", 0) or 0)
         )
 
+    # v19 — TWO defects fixed here, both exposed by declaring a third weapon.
+    #
+    # 1. The always-build band was an if/elif CASCADE. Chaff led it, so EMP was
+    #    only reached on a night chaff was capped or unaffordable: a three-weapon
+    #    rack took THREE separate orbits to fill, and check_wiring's
+    #    "orbital can buy emp" failed outright from an empty rack.
+    # 2. `held_weapon_blue` and `blue_total` were both read ONCE, on the stated
+    #    assumption that at most one weapon is queued per orbit. That assumption
+    #    died when the forge procurement hook started queueing a build of its
+    #    own. Two builds in one plan against a stale arsenal figure is how a
+    #    policy proposes an order the engine then refuses at the 600 ceiling —
+    #    the exact silent failure the cap descriptor exists to prevent.
+    #
+    # Both branches are independent now, and both tallies move as builds queue.
+    _queued_blue = [0]
+
     def _room_for(blue_cost: int) -> bool:
-        return held_weapon_blue + blue_cost <= weapon_blue_cap
+        return (
+            held_weapon_blue + _queued_blue[0] + blue_cost <= weapon_blue_cap
+        )
 
     def _afford_emp() -> bool:
         return (
-            blue_total >= emp_blue_cost
+            blue_total - _queued_blue[0] >= emp_blue_cost
             and remaining >= emp_credit_cost
             and _room_for(emp_blue_cost)
         )
 
     def _afford_chaff() -> bool:
         return (
-            blue_total >= chaff_blue_cost
+            blue_total - _queued_blue[0] >= chaff_blue_cost
             and remaining >= chaff_credit_cost
             and _room_for(chaff_blue_cost)
         )
@@ -344,34 +400,29 @@ def plan_orbit_actions(
             f"{weapon_blue_cap} blue arsenal cap)"
         )
     elif weapons_enabled and blue_total > dials.blue_always_build:
+        built_any = False
         if chaff_stock < dials.chaff_stockpile_cap and _afford_chaff():
             actions.append({"a": "build_chaff", "count": 1})
             remaining -= chaff_credit_cost
+            _queued_blue[0] += chaff_blue_cost
+            built_any = True
             descriptors.append(
                 f"built CHAFF for egress jam (blue {blue_total} > "
                 f"{dials.blue_always_build})"
             )
-        elif emp_stock < dials.emp_stockpile_cap and _afford_emp():
+        if emp_stock < dials.emp_stockpile_cap and _afford_emp():
             actions.append({"a": "build_emp", "count": 1})
             remaining -= emp_credit_cost
+            _queued_blue[0] += emp_blue_cost
+            built_any = True
             descriptors.append(
                 f"built EMP (blue {blue_total} > {dials.blue_always_build})"
             )
-        # --- weapon-forge hook (installed by forge_install.py) ---
-        elif chaff_stock < dials.chaff_stockpile_cap \
-                and _afford_chaff():
-            actions.append({"a": "build_chaff", "count": 1})
-            remaining -= chaff_credit_cost
-            descriptors.append("built CHAFF (blue surplus top-up)")
-        # --- weapon-forge hook (installed by forge_install.py) ---
-        elif emp_stock < dials.emp_stockpile_cap and _afford_emp():
-            actions.append({"a": "build_emp", "count": 1})
-            remaining -= emp_credit_cost
-            descriptors.append("built EMP (blue surplus top-up)")
-        else:
+        if not built_any:
             descriptors.append(
                 f"weapon build wanted (blue {blue_total}) but unaffordable "
-                f"(have {remaining}c)"
+                f"or capped (have {remaining}c, holding {held_weapon_blue} "
+                f"of {weapon_blue_cap} blue)"
             )
     elif (
         weapons_enabled
@@ -383,6 +434,7 @@ def plan_orbit_actions(
         if emp_rng.random() < dials.emp_roll_chance:
             actions.append({"a": "build_emp", "count": 1})
             remaining -= emp_credit_cost
+            _queued_blue[0] += emp_blue_cost
             descriptors.append(
                 f"built EMP (blue {blue_total} > {dials.blue_emp_roll}, "
                 f"50% roll hit)"

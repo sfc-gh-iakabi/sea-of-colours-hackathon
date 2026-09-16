@@ -74,9 +74,25 @@ _BLUE_GRAB_MIN = 192
 # blue unless the red on offer is genuinely better — which is what an
 # agent whose weapon is BOUGHT with blue actually wants.
 _STRONG_CHAIN_RED_MIN = weapon_forge.strong_chain_red_min(150)
-# Short mass halo to sweep after banking the pure (kept tight — the pure is the
-# prize; a long tail exposes the unit to weapons). The thinker/packager can trim.
-_SMASH_TAIL = 3
+# Mass halo to sweep after banking the pure.
+#
+# 3 -> 5 (v19). The old value was the tight reading: "the pure is the prize; a
+# long tail exposes the unit to weapons". Measured over 18 seasons that ranking
+# is INVERTED against the rest of this module — GRAB_MASS and GRAB_VEIN below
+# both get the full _HOLD_CAP_STEPS of 5, so a vein (tier multiplier 1.0) was
+# planning a 6-parcel outing while a PURE (multiplier 3.0, up to 765 points)
+# planned 4. The best find on the board got the shortest walk.
+#
+# The exposure argument does not survive contact either: a harvester gets ONE
+# OUTING PER NIGHT, so steps it does not take are not banked elsewhere — they
+# are simply lost. And the packager no longer cuts tails (it prices green and
+# fogged steps and keeps them), so the thinker can still shed a bad tail by
+# picking a different chain. 5 is the hold cap: drop + 5 steps = 6 parcels.
+_SMASH_TAIL = 5
+# Mass tail for the WALK_IN variant, where the pure is not adjacent so the trip
+# itself eats hold slots. Deliberately shorter than _SMASH_TAIL. Was an unnamed
+# literal 2 inline below, which made it invisible to tuning.
+_WALK_IN_TAIL = 3
 
 
 @dataclass
@@ -294,7 +310,8 @@ def force_surface_grabs(
             continue  # needs a probe — leave to seam_control / probe hints
         drop, path = wk
         tail = _mass_tail(
-            agent_view, cell, green, width, height, set(path) | {drop}, 2,
+            agent_view, cell, green, width, height, set(path) | {drop},
+            _WALK_IN_TAIL,
         )
         specs.append(GrabSpec(
             action="WALK_IN", target=cell, drop_at=drop, cells=list(path) + tail,
