@@ -112,8 +112,16 @@ ECONOMY = EconomyPolicy(hold_at={"emp": 1, "snap": 1, "chaff": 1})
 #
 # One weapon per information state:
 #   a rival lit a pure  -> GROUND: emp his seam, snap the contested cell
-#   nobody lit a pure   -> CLOCK: nothing to deny, so steal his late hours
-#   final night         -> CLOCK: an hour taken from him is never recovered
+#   any night at all    -> CLOCK: chaff his hour ONE, the richest hour he has
+#
+# CHAFF FIRES AT HOUR ONE, not late. The first draft of this file fired it at
+# hour 16 on the theory that our own late hours are worthless once our tours are
+# home. They are - but so are HIS. A harvester gets one outing per night and both
+# houses front-load, so a flare at H16 very likely cancels nothing at all. At H1
+# it cancels his opening drop, which is the hour a smash-and-grab takes a pure,
+# and the 3h window leaves him no retry inside it. The forge's own composed
+# rationale says the same thing and it was right: we are immune at H1 (launching
+# IS the move), self-jammed H2-H3, free from H4 with most of the night left.
 #
 # menu_rank is ASCENDING - lower shows FIRST. All four plays used to sit at 0,
 # so their order was declaration order, i.e. luck. They are now ranked by
@@ -130,11 +138,12 @@ PLAYS: Tuple[WeaponPlay, ...] = (
         min_targets=1,
         combines_with="smash_grab",
         why=(
-            "a pure we can see that a rival probe also watches is the one cell "
-            "whose occupation is predictable \u2014 they smash-and-grab it at "
-            "hour one; snapping it refuses that landing and damages the hull, "
-            "then a smash-grab lands on the cold pure at hour two and banks it "
-            "\u2014 765 points denied to them is worth exactly 765 banked by us"
+            "a high-value red we can see that a rival probe also watches is the "
+            "one cell whose occupation is predictable \u2014 they smash-and-grab "
+            "it at hour one; snapping it refuses that landing and damages the "
+            "hull, then a smash-grab lands on the cold cell at hour two and "
+            "banks it \u2014 up to 765 points denied to them is worth exactly "
+            "765 banked by us"
         ),
     ),
     WeaponPlay(
@@ -157,36 +166,22 @@ PLAYS: Tuple[WeaponPlay, ...] = (
         ),
     ),
     WeaponPlay(
-        play_id="LAST_CALL",
+        play_id="TEMPO_THEFT",
         weapon="chaff",
         menu_rank=30,
         when="always",
-        hour="last_night",
+        hour="super_early",
         targets="pattern",
         min_targets=1,
         combines_with="standalone",
         why=(
-            "on the final night an hour taken from them is gone for good \u2014 "
-            "there is no tomorrow to make it up in, while our own red is already "
-            "banked and ships itself; three of our dead hours for three of their "
-            "live ones, and it costs zero credits"
-        ),
-    ),
-    WeaponPlay(
-        play_id="TEMPO_THEFT",
-        weapon="chaff",
-        menu_rank=40,
-        when="no_redsign",
-        hour="late",
-        targets="pattern",
-        min_targets=1,
-        combines_with="standalone",
-        why=(
-            "with no pure lit there is no ground worth denying, so we take hours "
-            "instead: by hour sixteen every harvester of ours has spent its one "
-            "outing, so the flare costs us three worthless slots and costs them "
-            "a whole outing \u2014 and unlike snap or emp it costs no credits, "
-            "so it never delays the third harvester"
+            "cancelling hour one takes their opening drop \u2014 the single "
+            "richest hour of their night, when a smash-and-grab lands on a pure "
+            "\u2014 and the three-hour window gives them no retry inside it; we "
+            "are immune at H1 because launching IS our move, self-jammed at H2 "
+            "and H3, and free from H4 with most of the night still ahead, so "
+            "plan nothing in H2-H3 and walk in after them. It costs no credits, "
+            "so unlike snap or emp it never delays the third harvester"
         ),
     ),
 )

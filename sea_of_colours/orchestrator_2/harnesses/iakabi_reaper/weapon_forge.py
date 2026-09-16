@@ -1081,6 +1081,25 @@ _PROBE_VISION_R = 4          # Euclidean disk, matches scorch.probe_vision_radiu
 #: is a wrong turn that costs a whole class of snap play.
 _PURE_MIN = 255
 
+#: Minimum purity for a tile to be worth CONTESTING with a snap. Used only by
+#: `contested_pures`; `_PURE_MIN` above still means "is literally a pure".
+#:
+#: v19 — was `_PURE_MIN`, i.e. purity 255 EXACTLY. The engine's tiers are
+#: trace <=50, vein <=150, mass <=254, pure 255, so a mass at 254 — worth
+#: 254 * 1.5 = 381 points — was excluded BY ONE POINT. The trigger was hunting a
+#: single value, not a band, and across 8 seasons of soak19 it never once found
+#: one: PURE_TRAP was offered rarely and fired zero times while the snap sat in
+#: the rack all season.
+#:
+#: The docstring's argument for pure-only was "the pure is the one cell worth a
+#: smash-and-grab, so that is where they land". At 200 that still holds: 200-254
+#: is 300-381 points, the top of the mass band, and the rival's own value pyramid
+#: has a dedicated GRAB_MASS play — so a watched mass is a predictable landing
+#: too. Below ~200 it stops being true: a vein is not worth their opening hour,
+#: and a snap aimed at a cell they were never going to take is 100 blue plus 250
+#: credits plus an hour for nothing.
+_CONTESTED_MIN = 200
+
 #: Below this many exposed-edge cells (smear MINUS our own blast), an EMP
 #: play switches from combing the safe edge tonight to WAITING for the cloud
 #: to clear and combing the interior at H9+. Four is roughly what a two-step
@@ -1272,7 +1291,7 @@ def contested_pures(
     for t in (agent_view.get("red_tiles") or []):
         if not isinstance(t, Mapping):
             continue
-        if int(t.get("purity") or 0) < _PURE_MIN:
+        if int(t.get("purity") or 0) < _CONTESTED_MIN:
             continue
         cell = (int(t.get("x", -10 ** 6)), int(t.get("y", -10 ** 6)))
         watchers = sum(
@@ -1285,7 +1304,8 @@ def contested_pures(
     if not found:
         notes.append(
             f"{len(eyes)} rival eye(s) in view, none within "
-            f"{_PROBE_VISION_R} of a pure we can see — no contested pure"
+            f"{_PROBE_VISION_R} of a red tile at purity {_CONTESTED_MIN}+ "
+            f"we can see — nothing worth contesting"
         )
         return [], notes
 
